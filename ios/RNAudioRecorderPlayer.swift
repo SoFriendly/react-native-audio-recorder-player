@@ -232,9 +232,11 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
         audioSession = AVAudioSession.sharedInstance()
 
         do {
-            try audioSession.setCategory(.playAndRecord, mode: .default, options: [AVAudioSession.CategoryOptions.defaultToSpeaker, AVAudioSession.CategoryOptions.allowBluetooth])
+            try audioSession.setCategory(.playAndRecord, mode: .default, options: [AVAudioSession.CategoryOptions.defaultToSpeaker, AVAudioSession.CategoryOptions.allowBluetooth,  AVAudioSession.CategoryOptions.allowBluetoothA2DP])
             try audioSession.setActive(true)
-
+            
+            NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
+            
             audioSession.requestRecordPermission { granted in
                 DispatchQueue.main.async {
                     if granted {
@@ -249,6 +251,34 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
         }
     }
 
+    @objc func handleInterruption(notification: NSNotification) {
+        print("handleInterruption =>, \(notification.userInfo)")
+        guard let userInfo = notification.userInfo,
+            let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+            let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+                return
+        }
+        audioSession = AVAudioSession.sharedInstance()
+        do {
+            switch type {
+            case .began:
+                print("began")
+                try audioSession.setActive(false)
+                audioRecorder.pause()
+                print("audio paused")
+
+            default:
+                print("ended")
+                try audioSession.setCategory(.playAndRecord, mode: .default, options: [AVAudioSession.CategoryOptions.defaultToSpeaker, AVAudioSession.CategoryOptions.allowBluetooth,  AVAudioSession.CategoryOptions.allowBluetoothA2DP])
+                try audioSession.setActive(true)
+                audioRecorder.record()
+                print("audio resumed")
+            }
+        } catch {
+            print("Faled to record");
+        }
+    }
+    
     @objc(stopRecorder:rejecter:)
     public func stopRecorder(
         resolve: @escaping RCTPromiseResolveBlock,
@@ -264,6 +294,14 @@ class RNAudioRecorderPlayer: RCTEventEmitter, AVAudioRecorderDelegate {
         if (recordTimer != nil) {
             recordTimer!.invalidate()
             recordTimer = nil
+        }
+
+        do {
+            NotificationCenter.default.removeObserver(self)
+            audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setActive(false)
+        } catch {
+            print("Faled to record");
         }
 
         resolve(audioFileURL?.absoluteString)
